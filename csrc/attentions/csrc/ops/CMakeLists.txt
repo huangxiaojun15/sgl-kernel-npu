@@ -525,6 +525,10 @@ if (BUILD_OPEN_PROJECT)
 endif ()
 
 # ------------------------------------------------ generate adapt py ------------------------------------------------
+# CANN 9.2.0-beta.1 的 ascendc_impl_build.py 会给 string 属性默认值多套一层引号
+# （生成出 input_layout=""BNSD"" 这种非法 Python），opc 解析这些 impl .py 时报 SyntaxError。
+# 这里在生成之后把重复引号改回来。注意不要把带引号/括号的 sed 命令直接写进 CMake ——
+# CMake 生成 makefile 时不会给参数加引号，make 交给 /bin/sh 会报 Syntax error: "(" unexpected。
 add_custom_target(generate_adapt_py
         COMMAND ${HI_PYTHON} ${ASCENDC_CMAKE_UTIL_DIR}/ascendc_impl_build.py
         \"\"
@@ -534,6 +538,7 @@ add_custom_target(generate_adapt_py
         ${ASCEND_IMPL_OUT_DIR}
         ${ASCEND_AUTOGEN_DIR}
         --opsinfo-dir ${base_aclnn_binary_dir} ${base_aclnn_binary_dir}/inner ${base_aclnn_binary_dir}/exc
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/fix_impl_py_quotes.sh ${ASCEND_IMPL_OUT_DIR}/dynamic
 )
 
 add_dependencies(generate_adapt_py opbuild_gen_default opbuild_gen_inner opbuild_gen_exc)
