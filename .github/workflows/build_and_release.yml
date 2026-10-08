@@ -160,14 +160,13 @@ jobs:
           cd ../
           git clone https://gitcode.com/cann/ops-transformer.git
           cd ops-transformer
-          git checkout bcc6304
-          # CANN 9.2.0 的 opbase 头文件把 ElewiseBaseTiling 的 AdaptEleBaseTilingData /
-          # GetScheMode / GetBlockDim 声明成了 const，而该提交里 fetch 的 opbase 源码还是
-          # 非 const 版本，编译时报 "no declaration matches"。这里只把 opbase 换到
-          # 9.2.0 对应的 revision（ops-transformer 9.2.0-beta.1 分支用的就是它）
+          # 9.2.0 必须用配套分支：它 pin 的 opbase 才和 CANN 9.2.0 的头文件一致
+          # （旧 pin 的 opbase 会让 ElewiseBaseTiling 的 const 声明对不上），
+          # 而且它的代码按新 opbase 的日志接口适配过（只换 opbase 会报 'OP' 未声明）
           if [ "${{ matrix.cann_version }}" = "9.2.0" ]; then
-            sed -i 's/ee5334d157016d2afa736d4a23381855dbf1fe37/ec8c387b251655664f4679f1bc5fd30a69efc5a7/' cmake/third_party/opbase.cmake
-            grep -n "OPBASE_TAG_ID" cmake/third_party/opbase.cmake
+            git checkout 9.2.0-beta.1
+          else
+            git checkout bcc6304
           fi
           env -i PATH=${PATH} bash --login -c "
             pip install packaging
@@ -180,11 +179,11 @@ jobs:
           cd ../
           git clone https://gitcode.com/cann/ops-transformer.git
           cd ops-transformer
-          git checkout bcc6304
-          # 同上：9.2.0 需要匹配 CANN 9.2.0 头文件的 opbase revision
+          # 同上：9.2.0 走配套分支
           if [ "${{ matrix.cann_version }}" = "9.2.0" ]; then
-            sed -i 's/ee5334d157016d2afa736d4a23381855dbf1fe37/ec8c387b251655664f4679f1bc5fd30a69efc5a7/' cmake/third_party/opbase.cmake
-            grep -n "OPBASE_TAG_ID" cmake/third_party/opbase.cmake
+            git checkout 9.2.0-beta.1
+          else
+            git checkout bcc6304
           fi
           env -i PATH=${PATH} bash --login -c "
             pip install packaging
