@@ -1,0 +1,14 @@
+diff --git a/ops/ascendc/CMakeLists.txt b/ops/ascendc/CMakeLists.txt
+--- a/ops/ascendc/CMakeLists.txt
++++ b/ops/ascendc/CMakeLists.txt
+@@ -542,6 +542,10 @@
+         ${ASCEND_IMPL_OUT_DIR}
+         ${ASCEND_AUTOGEN_DIR}
+         --opsinfo-dir ${base_aclnn_binary_dir} ${base_aclnn_binary_dir}/inner ${base_aclnn_binary_dir}/exc
++        # CANN 9.2.0-beta.1 的 ascendc_impl_build.py 会给 string 类型属性的默认值再套一层引号
++        # (生成出 quant_mode=""static"" 这种非法 Python)，opc 解析该 .py 时直接 SyntaxError，
++        # 这里把重复的引号还原成正常的字符串字面量
++        COMMAND find ${ASCEND_IMPL_OUT_DIR}/dynamic -name "*.py" -exec sed -i -E [=[s/=""([^"]*)""/="\1"/g]=] {} +
+ )
+ 
+ add_dependencies(generate_adapt_py opbuild_gen_default opbuild_gen_inner opbuild_gen_exc)

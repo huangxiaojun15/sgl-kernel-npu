@@ -88,3 +88,30 @@ ${UV_PIP_INSTALL} \
     --index-url ${TORCH_CACHE_URL:="https://download.pytorch.org/whl/cpu"} \
     --extra-index-url ${PYPI_CACHE_URL:="https://pypi.org/simple/"}
 ${PIP_INSTALL} ${TORCH_NPU_URL}
+
+### CANN 9.2.0 兼容处理
+## torch_npu 26.2.0-beta.1 里自带的 acl 头 graph/ge_error_codes.h 仍然把 ge::GRAPH_* 常量
+## 定义在自己文件里，而 CANN 9.2.0 已经把这批常量挪到了 graph/error_codes.h，并且把
+## ge_error_codes.h 变成转发头。torch_npu 的头在 tiling/tiling_api.h 之外被再次包含时，
+## 同一个编译单元里会出现两份 const graphStatus ge::GRAPH_*，报 redefinition。
+## 处理方式：用 CANN 自带的同名头替换 torch_npu 里那份旧头，使两处 include 落到同一个文件。
+if [[ "${CANN_VERSION}" == "9.2.0" ]]; then
+    torch_npu_root="$(python3 -c 'import os, torch_npu; print(os.path.dirname(torch_npu.__file__))' 2>/dev/null || true)"
+    if [[ -z "${torch_npu_root}" ]]; then
+        torch_npu_root="$(python3 -c 'import os, site; print(os.path.join(site.getsitepackages()[0], "torch_npu"))')"
+    fi
+    stale_header="${torch_npu_root}/include/third_party/acl/inc/graph/ge_error_codes.h"
+    if [[ -f "${stale_header}" ]]; then
+        cp -n "${stale_header}" "${stale_header}.torch-npu.orig"
+        cann_header="$(find "${ASCEND_HOME_PATH:-/usr/local/Ascend/ascend-toolkit/latest}" \
+            -path "*/include/graph/ge_error_codes.h" 2>/dev/null | head -n 1)"
+        if [[ -n "${cann_header}" ]]; then
+            cp -f "${cann_header}" "${stale_header}"
+        else
+            printf '#pragma once\n#include <graph/error_codes.h>\n' > "${stale_header}"
+        fi
+        echo "INFO: replaced ${stale_header} for CANN ${CANN_VERSION} (source: ${cann_header:-forwarding header})"
+    else
+        echo "WARNING: ${stale_header} not found, skip CANN ${CANN_VERSION} acl header compat patch"
+    fi
+fi

@@ -22,6 +22,7 @@ jobs:
     permissions:
       contents: write
     strategy:
+      fail-fast: false
       matrix:
         arch: [x86_64, aarch64]
         npu_hardware: [a3, 950]
@@ -120,6 +121,7 @@ jobs:
     permissions:
       contents: write
     strategy:
+      fail-fast: false
       matrix:
         arch: [ x86_64, aarch64 ]
         npu_hardware: [ a3, 950 ]
@@ -159,6 +161,14 @@ jobs:
           git clone https://gitcode.com/cann/ops-transformer.git
           cd ops-transformer
           git checkout bcc6304
+          # CANN 9.2.0 的 opbase 头文件把 ElewiseBaseTiling 的 AdaptEleBaseTilingData /
+          # GetScheMode / GetBlockDim 声明成了 const，而该提交里 fetch 的 opbase 源码还是
+          # 非 const 版本，编译时报 "no declaration matches"。这里只把 opbase 换到
+          # 9.2.0 对应的 revision（ops-transformer 9.2.0-beta.1 分支用的就是它）
+          if [ "${{ matrix.cann_version }}" = "9.2.0" ]; then
+            sed -i 's/ee5334d157016d2afa736d4a23381855dbf1fe37/ec8c387b251655664f4679f1bc5fd30a69efc5a7/' cmake/third_party/opbase.cmake
+            grep -n "OPBASE_TAG_ID" cmake/third_party/opbase.cmake
+          fi
           env -i PATH=${PATH} bash --login -c "
             pip install packaging
             bash build.sh --pkg --experimental --soc=ascend910_93 --ops=\"sparse_attn_sharedkv,sparse_attn_sharedkv_metadata,quant_lightning_indexer,quant_lightning_indexer_metadata,compressor\"
@@ -171,6 +181,11 @@ jobs:
           git clone https://gitcode.com/cann/ops-transformer.git
           cd ops-transformer
           git checkout bcc6304
+          # 同上：9.2.0 需要匹配 CANN 9.2.0 头文件的 opbase revision
+          if [ "${{ matrix.cann_version }}" = "9.2.0" ]; then
+            sed -i 's/ee5334d157016d2afa736d4a23381855dbf1fe37/ec8c387b251655664f4679f1bc5fd30a69efc5a7/' cmake/third_party/opbase.cmake
+            grep -n "OPBASE_TAG_ID" cmake/third_party/opbase.cmake
+          fi
           env -i PATH=${PATH} bash --login -c "
             pip install packaging
             bash build.sh --pkg --experimental --soc=ascend950 --ops=\"quant_lightning_indexer,quant_lightning_indexer_metadata,compressor,kv_quant_sparse_attn_sharedkv,kv_quant_sparse_attn_sharedkv_metadata,kv-compressor_epilog,hc_post,inplace_partial_rotary_mul,indexer_compress_epilog,moe_gating_top_k\"
@@ -198,6 +213,7 @@ jobs:
     permissions:
       contents: write
     strategy:
+      fail-fast: false
       matrix:
         arch: [ x86_64, aarch64 ]
         npu_hardware: [ a3, 950 ]
@@ -237,6 +253,11 @@ jobs:
           git clone https://gitcode.com/cann/cann-recipes-infer.git
           cd cann-recipes-infer
           git checkout 35a476c
+          # CANN 9.2.0 的 ascendc_impl_build.py 生成 impl .py 时会给 string 属性默认值
+          # 多套一层引号，opc 解析报 SyntaxError，先打补丁修掉（仅 9.2.0 需要）
+          if [ "${{ matrix.cann_version }}" = "9.2.0" ]; then
+            git apply ../sgl-kernel-npu/contrib/patch/Adapt-custom-ops-CANN920.patch
+          fi
           env -i PATH=${PATH} bash --login -c "
             cd ops/ascendc/torch_ops_extension
             pip install ninja
@@ -254,6 +275,10 @@ jobs:
           git clone https://gitcode.com/cann/cann-recipes-infer.git
           cd cann-recipes-infer
           git checkout 35a476c
+          # 同上：9.2.0 需要修正 opc 生成的 impl .py 里的重复引号
+          if [ "${{ matrix.cann_version }}" = "9.2.0" ]; then
+            git apply ../sgl-kernel-npu/contrib/patch/Adapt-custom-ops-CANN920.patch
+          fi
           env -i PATH=${PATH} bash --login -c "
             cd ops/ascendc/torch_ops_extension
             pip install ninja
