@@ -88,4 +88,3 @@ ${UV_PIP_INSTALL} \
     --index-url ${TORCH_CACHE_URL:="https://download.pytorch.org/whl/cpu"} \
     --extra-index-url ${PYPI_CACHE_URL:="https://pypi.org/simple/"}
 ${PIP_INSTALL} ${TORCH_NPU_URL}
-
