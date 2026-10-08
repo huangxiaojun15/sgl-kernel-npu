@@ -51,6 +51,29 @@ jobs:
         run: |
           bash scripts/npu_ci_install_dependency.sh --cann-version ${{ matrix.cann_version }}
 
+      # 只在这个 job 打这个补丁：csrc 里同时包含 CANN 的 tiling 头和 torch_npu 的头，
+      # 两边都定义 ge::GRAPH_* 常量会报 redefinition（CANN 9.2.0 把常量搬到了
+      # graph/error_codes.h）。cann-custom 的 torch_ops_extension 构建没有 CANN 的
+      # include 根目录，在那边打这个补丁反而会找不到头，所以不放在 install 脚本里。
+      - name: Patch torch_npu ACL header for CANN 9.2.0
+        if: matrix.cann_version == '9.2.0'
+        run: |
+          torch_npu_root="$(python3 -c 'import os, torch_npu; print(os.path.dirname(torch_npu.__file__))')"
+          stale_header="${torch_npu_root}/include/third_party/acl/inc/graph/ge_error_codes.h"
+          cp -n "${stale_header}" "${stale_header}.torch-npu.orig"
+          # 1) 删掉与 CANN graph/error_codes.h 重复的 GRAPH_* 常量定义
+          sed -i -E '/^[[:space:]]*const[[:space:]]+graphStatus[[:space:]]+GRAPH_[A-Za-z0-9_]+[[:space:]]*=/d' "${stale_header}"
+          # 2) 让旧头引用 CANN 的新头；优先用绝对路径，避免依赖 -I
+          #    注意不能整份拷 CANN 的同名头 —— 那个文件内部是相对路径 include "error_codes.h"
+          cann_header="$(find "${ASCEND_HOME_PATH:-/usr/local/Ascend/ascend-toolkit/latest}" \
+              -path "*/graph/error_codes.h" 2>/dev/null | head -n 1)"
+          if [ -n "${cann_header}" ]; then
+            sed -i "1i #include \"${cann_header}\"" "${stale_header}"
+          else
+            sed -i '1i #include <graph/error_codes.h>' "${stale_header}"
+          fi
+          echo "INFO: patched ${stale_header} (include: ${cann_header:-<graph/error_codes.h>}, remaining duplicate consts: $(grep -c -E 'const[[:space:]]+graphStatus[[:space:]]+GRAPH_' "${stale_header}" || true))"
+
       - name: Build SGL-Kernel-NPU for a3
         if: matrix.npu_hardware == 'a3'
         run: |

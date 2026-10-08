@@ -89,28 +89,3 @@ ${UV_PIP_INSTALL} \
     --extra-index-url ${PYPI_CACHE_URL:="https://pypi.org/simple/"}
 ${PIP_INSTALL} ${TORCH_NPU_URL}
 
-### CANN 9.2.0 兼容处理
-## torch_npu 26.2.0-beta.1 里自带的 acl 头 graph/ge_error_codes.h 仍然把 ge::GRAPH_* 常量
-## 定义在自己文件里，而 CANN 9.2.0 已经把这批常量挪到了 graph/error_codes.h。两条 include
-## 链（tiling/tiling_api.h 和 torch_npu 的 OpCommand.h）在同一个编译单元里相遇就会报
-## redefinition。
-## 注意：不能把 CANN 的同名头整份拷过来 —— 那个文件内部是 #include "error_codes.h"
-## （相对路径），搬到 torch_npu 的 graph/ 目录下就找不到头了。正确做法是只删掉重复的
-## 常量定义，并让这个文件引用 CANN 的新头。
-if [[ "${CANN_VERSION}" == "9.2.0" ]]; then
-    torch_npu_root="$(python3 -c 'import os, torch_npu; print(os.path.dirname(torch_npu.__file__))' 2>/dev/null || true)"
-    if [[ -z "${torch_npu_root}" ]]; then
-        torch_npu_root="$(python3 -c 'import os, site; print(os.path.join(site.getsitepackages()[0], "torch_npu"))')"
-    fi
-    stale_header="${torch_npu_root}/include/third_party/acl/inc/graph/ge_error_codes.h"
-    if [[ -f "${stale_header}" ]]; then
-        cp -n "${stale_header}" "${stale_header}.torch-npu.orig"
-        # 1) 删掉与 CANN graph/error_codes.h 重复的 GRAPH_* 常量定义
-        sed -i -E '/^[[:space:]]*const[[:space:]]+graphStatus[[:space:]]+GRAPH_[A-Za-z0-9_]+[[:space:]]*=/d' "${stale_header}"
-        # 2) 让旧头引用 CANN 的新头（尖括号走 -I，避免相对路径找不到）
-        sed -i '1i #include <graph/error_codes.h>' "${stale_header}"
-        echo "INFO: patched ${stale_header} for CANN ${CANN_VERSION} (remaining duplicate consts: $(grep -c -E 'const[[:space:]]+graphStatus[[:space:]]+GRAPH_' "${stale_header}" || true))"
-    else
-        echo "WARNING: ${stale_header} not found, skip CANN ${CANN_VERSION} acl header compat patch"
-    fi
-fi
