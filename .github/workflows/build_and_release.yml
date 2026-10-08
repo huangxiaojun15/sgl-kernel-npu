@@ -71,8 +71,10 @@ jobs:
             exit 1
           fi
           cp -n "${stale_header}" "${stale_header}.torch-npu.orig"
-          # 1) 删掉与 CANN graph/error_codes.h 重复的 GRAPH_* 常量定义
-          sed -i -E '/^[[:space:]]*const[[:space:]]+graphStatus[[:space:]]+GRAPH_[A-Za-z0-9_]+[[:space:]]*=/d' "${stale_header}"
+          # 1) 删掉与 CANN graph/error_codes.h 重复的常量定义
+          #    注意名字不都是 GRAPH_ 前缀，例如 OP_WITHOUT_IR_DATATYPE_INFER_RULE，
+          #    所以这里不能只匹配 GRAPH_*
+          sed -i -E '/^[[:space:]]*const[[:space:]]+graphStatus[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=/d' "${stale_header}"
           # 2) 让旧头引用 CANN 的新头；优先用绝对路径，避免依赖 -I
           #    注意不能整份拷 CANN 的同名头 —— 那个文件内部是相对路径 include "error_codes.h"
           cann_root="${ASCEND_HOME_PATH:-}"
@@ -86,7 +88,7 @@ jobs:
           else
             sed -i '1i #include <graph/error_codes.h>' "${stale_header}"
           fi
-          echo "INFO: patched ${stale_header} (include: ${cann_header:-<graph/error_codes.h>}, remaining duplicate consts: $(grep -c -E 'const[[:space:]]+graphStatus[[:space:]]+GRAPH_' "${stale_header}" || true))"
+          echo "INFO: patched ${stale_header} (include: ${cann_header:-<graph/error_codes.h>}, remaining duplicate consts: $(grep -c -E '^[[:space:]]*const[[:space:]]+graphStatus[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=' "${stale_header}" || true))"
           sed -n '1,3p' "${stale_header}"
 
       - name: Build SGL-Kernel-NPU for a3
