@@ -141,6 +141,22 @@ jobs:
           git clone https://gitcode.com/cann/ops-transformer.git
           cd ops-transformer
           git checkout bcc6304
+          # <改> 让 opbase 自带的头排到 CANN 9.3.0 包里的同名头前面（上游 f51d44c84 的修复）。
+          #      CANN 9.3.0 的 pkg_inc/op_common/atvoss 头会遮蔽 opbase 自带的同名头，
+          #      导致 AdaptEleBaseTilingData/GetScheMode/GetBlockDim "no declaration matches"
+          #      （CANN 头里是 const）和 'WORKSPACE_SIZE' was not declared。
+          #      只调 include 顺序，opbase 版本和算子源码都不用动。
+          python3 - <<'PY'
+          import re
+          p = "cmake/variables.cmake"
+          s = open(p, encoding="utf-8").read()
+          for name in ("OPAPI_INCLUDE", "OP_TILING_INCLUDE", "OP_PROTO_INCLUDE", "AICPU_INCLUDE"):
+              m = re.search(r"set\(" + name + r"\n(.*?\n)\)", s, re.S)
+              body = "\n".join(l for l in m.group(1).split("\n") if "${OPBASE_INC_DIRS}" not in l)
+              s = s[:m.start(1)] + "  ${OPBASE_INC_DIRS}\n" + body + s[m.end(1):]
+          open(p, "w", encoding="utf-8").write(s)
+          PY
+          grep -n -A2 '^set(OP_TILING_INCLUDE' cmake/variables.cmake
           env -i PATH=${PATH} bash --login -c "
             pip install packaging
             bash build.sh --pkg --experimental --soc=ascend950 --ops=\"quant_lightning_indexer,quant_lightning_indexer_metadata,compressor,kv_quant_sparse_attn_sharedkv,kv_quant_sparse_attn_sharedkv_metadata,kv-compressor_epilog,hc_post,inplace_partial_rotary_mul,indexer_compress_epilog,moe_gating_top_k\"
