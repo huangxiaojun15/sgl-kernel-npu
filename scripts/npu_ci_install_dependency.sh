@@ -8,9 +8,9 @@ export UV_PIP_INSTALL="uv pip install"
 
 
 ### Dependency Versions
-# PyTorch: Default to torch 2.10.0, can be overridden by --torch-version
-TORCH_VERSION="2.10.0"
-TORCHVISION_VERSION="0.25.0"
+# PyTorch: Default to torch 2.8.0, can be overridden by --torch-version
+TORCH_VERSION="2.12.0"
+TORCHVISION_VERSION="0.27.0" 
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -20,42 +20,39 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--cann-version <9.1.0|9.2.0>]"
+            echo "Usage: $0 [--cann-version <9.3.0>]"
             exit 1
             ;;
     esac
 done
 
-case "${CANN_VERSION}" in
-    "9.1.0")
-        TORCH_NPU_URL="https://gitcode.com/Ascend/pytorch/releases/download/v26.1.0-pytorch2.10.0/torch_npu-2.10.0.post4-cp312-cp312-manylinux_2_28_${ARCHITECT}.whl"
-        ;;
-    # 9.2.0 目前只有 beta 镜像：9.2.0-beta.1-<hw>-ubuntu22.04-py3.12
-    # 对应 torch_npu release 为 v26.2.0-beta.1-pytorch2.10.0
-    "9.2.0")
-        TORCH_NPU_URL="https://gitcode.com/Ascend/pytorch/releases/download/v26.2.0-beta.1-pytorch2.10.0/torch_npu-2.10.0.post5-cp312-cp312-manylinux_2_28_${ARCHITECT}.whl"
-        ;;
-    *)
-        echo "Unsupported CANN version: ${CANN_VERSION}"
-        echo "Supported versions: 9.1.0, 9.2.0"
-        exit 1
-        ;;
-esac
+# 只支持自建的 CANN 9.3.0 镜像
+if [[ "${CANN_VERSION}" != "9.3.0" ]]; then
+    echo "Unsupported CANN version: ${CANN_VERSION}"
+    echo "Supported versions: 9.3.0"
+    exit 1
+fi
 
-apt update -y && \
-apt upgrade -y && \
-apt install -y \
-    locales \
+
+TORCH_NPU_VERSION="${TORCH_NPU_VERSION:-2.12.0.post2}"
+
+### Install required dependencies
+## APT packages
+dnf makecache
+dnf install -y \
+    glibc-all-langpacks \
     ca-certificates \
-    build-essential \
+    gcc \
+    gcc-c++ \
+    make \
     cmake \
-    ccache \
-    pkg-config \
-    zlib1g-dev \
+    pkgconf \
+    zlib-devel \
     wget \
     curl \
     zip \
-    unzip
+    unzip \
+    python3-devel
 
 ## Setup
 locale-gen en_US.UTF-8
@@ -87,4 +84,6 @@ ${UV_PIP_INSTALL} \
     torchaudio==${TORCH_VERSION} \
     --index-url ${TORCH_CACHE_URL:="https://download.pytorch.org/whl/cpu"} \
     --extra-index-url ${PYPI_CACHE_URL:="https://pypi.org/simple/"}
+## torch_npu
+# GitCode does not allow UV downloads.
 ${PIP_INSTALL} ${TORCH_NPU_URL}
