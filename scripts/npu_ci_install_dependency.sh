@@ -98,10 +98,13 @@ if command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then
     echo "Using package manager: ${PKG_MGR}"
     ${PKG_MGR} makecache
     # <改> python3-devel 提供 Python.h；zip/unzip 供后面的打包步骤使用；
+    #      patch 是 ops-transformer 编译 abseil 时 ExternalProject 的 patch 步骤要用的，
+    #      基础镜像里没有，缺了会直接 "patch: command not found"（gmake Error 127）；
     #      glibc-all-langpacks 提供 en_US.UTF-8 的 locale 数据（openEuler 没有 locale-gen）
     ${PKG_MGR} install -y \
         zip \
         unzip \
+        patch \
         which \
         findutils \
         tar \
@@ -132,6 +135,7 @@ elif command -v apt-get >/dev/null 2>&1; then
         curl \
         zip \
         unzip \
+        patch \
         python3-dev
 else
     echo "Error: 没找到 dnf/yum/apt-get"
