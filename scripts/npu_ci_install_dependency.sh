@@ -97,7 +97,8 @@ if command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then
     PKG_MGR="$(command -v dnf 2>/dev/null || command -v yum)"
     echo "Using package manager: ${PKG_MGR}"
     ${PKG_MGR} makecache
-    # <改> python3-devel 提供 Python.h；zip/unzip 供后面的打包步骤使用
+    # <改> python3-devel 提供 Python.h；zip/unzip 供后面的打包步骤使用；
+    #      glibc-all-langpacks 提供 en_US.UTF-8 的 locale 数据（openEuler 没有 locale-gen）
     ${PKG_MGR} install -y \
         zip \
         unzip \
@@ -107,6 +108,9 @@ if command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then
         xz \
         git \
         ca-certificates \
+        glibc-all-langpacks \
+        zlib-devel \
+        pkgconf \
         python3-devel \
         numactl-devel \
         sqlite-devel
@@ -134,14 +138,29 @@ else
     exit 1
 fi
 
-## Setup（locale-gen 只有 debian 系有）
+## Setup
+# locale-gen 只有 Debian 系有（openEuler 上它是 command not found，退出码 127，
+# 会把整个 Install dependency 步骤带崩）。这里做三件事：
+#   1) 优先用 localedef 生成 en_US.UTF-8
+#   2) 生不出来就退回 glibc>=2.35 自带的 C.UTF-8，保证后面 python / cmake 处于 UTF-8 环境
+#   3) update-ca-certificates 同样是 Debian 系命令，openEuler 上是 update-ca-trust，没有就跳过
 if command -v locale-gen >/dev/null 2>&1; then
-    locale-gen en_US.UTF-8
+    locale-gen en_US.UTF-8 || true
+elif command -v localedef >/dev/null 2>&1; then
+    localedef -i en_US -f UTF-8 en_US.UTF-8 || true
 fi
-command -v update-ca-certificates >/dev/null 2>&1 && update-ca-certificates
-export LANG=${LANG:-en_US.UTF-8}
-export LANGUAGE=${LANGUAGE:-en_US:en}
-export LC_ALL=${LC_ALL:-en_US.UTF-8}
+command -v update-ca-certificates >/dev/null 2>&1 && update-ca-certificates || true
+
+if locale -a 2>/dev/null | grep -qiE '^en_US\.(utf-?8)$'; then
+    export LANG=en_US.UTF-8
+    export LANGUAGE=en_US:en
+    export LC_ALL=en_US.UTF-8
+else
+    echo "[warn] en_US.UTF-8 没生成出来，改用 C.UTF-8"
+    export LANG=C.UTF-8
+    export LANGUAGE=C.UTF-8
+    export LC_ALL=C.UTF-8
+fi
 
 ### --------------------------------------------------------------------
 ### Python 依赖
@@ -178,11 +197,41 @@ ${PIP_INSTALL} "torch-npu==${TORCH_NPU_VERSION}" \
     --extra-index-url https://ascend.devcloud.huaweicloud.com/pypi/simple/
 
 ### --------------------------------------------------------------------
-### 自检：编算子前先确认这几个 import 都是通的
+### CANN 运行环境：编算子前必须挂上，否则 import torch_npu 找不到 CANN 的 so
 ### --------------------------------------------------------------------
+# set_env.sh 里会引用未定义变量，source 期间临时关掉 nounset
+if [ -f /usr/local/Ascend/cann/set_env.sh ]; then
+    set +u
+    # shellcheck disable=SC1091
+    source /usr/local/Ascend/cann/set_env.sh
+    set -u
+else
+    echo "[warn] 没找到 /usr/local/Ascend/cann/set_env.sh"
+fi
+
+### --------------------------------------------------------------------
+### 自检：编算子只需要 torch 的头文件/库，不需要真的加载 NPU 后端
+### --------------------------------------------------------------------
+# torch 2.12 起 import torch 会自动加载 torch_npu 后端；CI runner 上没有 NPU
+# 驱动（libascend_hal.so），自动加载会让 import torch 直接 ImportError。
+export TORCH_DEVICE_BACKEND_AUTOLOAD=0
+
+# 真机上才有的驱动库目录，存在就挂上；不存在也不影响（CI 里就是不存在）
+for d in /usr/local/Ascend/driver/lib64 /usr/local/Ascend/driver/lib64/driver /usr/local/Ascend/driver/lib64/common; do
+    [ -d "$d" ] && export LD_LIBRARY_PATH="$d:${LD_LIBRARY_PATH:-}"
+done
+
 python3 - <<'PY'
-import torch, torch_npu, pybind11
+import importlib.metadata as md
+import torch, pybind11
 print("torch     :", torch.__version__)
-print("torch_npu :", torch_npu.__version__)
+print("torch_npu :", md.version("torch-npu"))
 print("pybind11  :", pybind11.__version__, pybind11.get_include())
 PY
+
+# 有驱动才真的 import torch_npu（CI 里没有，跳过）
+if ldconfig -p 2>/dev/null | grep -q libascend_hal || [ -e /usr/local/Ascend/driver/lib64/libascend_hal.so ]; then
+    python3 -c "import torch_npu; print('torch_npu import OK:', torch_npu.__version__)"
+else
+    echo "[warn] 没有 NPU 驱动（libascend_hal.so），跳过 import torch_npu 自检"
+fi
