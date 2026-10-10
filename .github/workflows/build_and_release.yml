@@ -141,22 +141,55 @@ jobs:
           git clone https://gitcode.com/cann/ops-transformer.git
           cd ops-transformer
           git checkout bcc6304
-          # <改> 让 opbase 自带的头排到 CANN 9.3.0 包里的同名头前面（上游 f51d44c84 的修复）。
-          #      CANN 9.3.0 的 pkg_inc/op_common/atvoss 头会遮蔽 opbase 自带的同名头，
-          #      导致 AdaptEleBaseTilingData/GetScheMode/GetBlockDim "no declaration matches"
-          #      （CANN 头里是 const）和 'WORKSPACE_SIZE' was not declared。
-          #      只调 include 顺序，opbase 版本和算子源码都不用动。
+          # <改> 保留 bcc6304，补上 CANN 9.3.0 兼容修复（照搬上游 f51d44c84 + master）：
+          #   1) FindOPBASE.cmake 加 NO_DEFAULT_PATH。
+          #      关键点：find_path 的默认搜索路径排在 PATHS 前面，所以光调 include
+          #      顺序没用——它会先把 OPBASE_INC_DIR 定到 CANN 包里的
+          #      aarch64-linux/include（FindOPBASE 打印的 "Found OPABSE include:"
+          #      就是它），opbase 自己的源码于是被 CANN 9.3.0 的头编译，报
+          #      AdaptEleBaseTilingData / GetScheMode / GetBlockDim
+          #      "no declaration matches"（CANN 头里是 const）和
+          #      'WORKSPACE_SIZE' was not declared（它只定义在 opbase 自己的
+          #      pkg_inc/op_common/atvoss/reduce/reduce_tiling.h 里）。
+          #      加 NO_DEFAULT_PATH 后 OPBASE_INC_DIR 落到 third_party/opbase/include，
+          #      opbase 的头和源码就是同一个版本的。
+          #   2) variables.cmake 把 ${OPBASE_INC_DIRS} 提到各 include 列表最前（f51d44c84）。
+          #   3) ops_err.h 里 OpLogSub(OP, ...) 的 OP 在 CANN 9.3.0 的 log.h 里已经
+          #      没有了，换成模块号常量（上游 master 的写法）。
           python3 - <<'PY'
-          import re
-          p = "cmake/variables.cmake"
-          s = open(p, encoding="utf-8").read()
-          for name in ("OPAPI_INCLUDE", "OP_TILING_INCLUDE", "OP_PROTO_INCLUDE", "AICPU_INCLUDE"):
-              m = re.search(r"set\(" + name + r"\n(.*?\n)\)", s, re.S)
-              body = "\n".join(l for l in m.group(1).split("\n") if "${OPBASE_INC_DIRS}" not in l)
-              s = s[:m.start(1)] + "  ${OPBASE_INC_DIRS}\n" + body + s[m.end(1):]
-          open(p, "w", encoding="utf-8").write(s)
+          def patch(path, old, new):
+              s = open(path, encoding="utf-8").read()
+              assert s.count(old) == 1, (path, old[:40])
+              open(path, "w", encoding="utf-8").write(s.replace(old, new, 1))
+
+          p = "cmake/modules/FindOPBASE.cmake"
+          patch(p, "  PATHS ${OPBASE_HEAD_SEARCH_PATHS}\n  NO_CMAKE_SYSTEM_PATH\n",
+                   "  PATHS ${OPBASE_HEAD_SEARCH_PATHS}\n  NO_DEFAULT_PATH\n  NO_CMAKE_SYSTEM_PATH\n")
+          patch(p, "  set(OPBASE_INC_DIRS\n",
+                   "  set(OPBASE_INC_DIRS\n"
+                   "    ${OPBASE_SOURCE_PATH}/pkg_inc/op_common\n"
+                   "    ${OPBASE_SOURCE_PATH}/include/op_common\n"
+                   "    ${OPBASE_SOURCE_PATH}/pkg_inc/op_common/op_host\n"
+                   "    ${OPBASE_SOURCE_PATH}/include/op_common/op_host\n"
+                   "    ${OPBASE_SOURCE_PATH}/include/op_common/atvoss\n")
+
+          s = open("cmake/variables.cmake", encoding="utf-8").read()
+          for name in ("OPAPI_INCLUDE", "OP_TILING_INCLUDE", "OP_PROTO_INCLUDE"):
+              head = f"set({name}\n"
+              start = s.index(head) + len(head)
+              end = s.index("\n)\n", start)
+              body = "\n".join(l for l in s[start:end].split("\n") if "${OPBASE_INC_DIRS}" not in l)
+              s = s[:start] + "  ${OPBASE_INC_DIRS}\n" + body + s[end:]
+          open("cmake/variables.cmake", "w", encoding="utf-8").write(s)
+
+          p = "common/include/err/ops_err.h"
+          patch(p, '#include "log/log.h"\n',
+                   '#include "log/log.h"\n\nconstexpr int32_t OP_TRANSFORMER_MODULE_ID = 63;\n')
+          patch(p, "OpLogSub(OP, DLOG_ERROR", "OpLogSub(OP_TRANSFORMER_MODULE_ID, DLOG_ERROR")
+          print("ops-transformer CANN 9.3.0 兼容补丁已应用")
           PY
-          grep -n -A2 '^set(OP_TILING_INCLUDE' cmake/variables.cmake
+          grep -n NO_DEFAULT_PATH cmake/modules/FindOPBASE.cmake
+          grep -n OP_TRANSFORMER_MODULE_ID common/include/err/ops_err.h
           env -i PATH=${PATH} bash --login -c "
             pip install packaging
             bash build.sh --pkg --experimental --soc=ascend950 --ops=\"quant_lightning_indexer,quant_lightning_indexer_metadata,compressor,kv_quant_sparse_attn_sharedkv,kv_quant_sparse_attn_sharedkv_metadata,kv-compressor_epilog,hc_post,inplace_partial_rotary_mul,indexer_compress_epilog,moe_gating_top_k\"
