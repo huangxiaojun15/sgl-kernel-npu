@@ -131,10 +131,6 @@ jobs:
         arch: [x86_64, aarch64]
         npu_hardware: [a3, '950']
         cann_version: ['9.1.0', '9.2.0']
-        exclude:
-          # CANN 9.1 的 ops-transformer 分支不包含 950 所需算子。
-          - npu_hardware: '950'
-            cann_version: '9.1.0'
         include:
           - arch: x86_64
             runner: ubuntu-24.04
@@ -172,7 +168,7 @@ jobs:
 
           case "${{ matrix.cann_version }}" in
             "9.1.0")
-              OPS_TRANSFORMER_COMMIT="6f0d3ec620b338cab4f2d00322ff2e0d141419d2"
+              OPS_TRANSFORMER_COMMIT="bcc6304656c9e712b50b1faa22872a158b1e34c5"
               ;;
             "9.2.0")
               OPS_TRANSFORMER_COMMIT="33cc4ab2c7efe16d4f78b34a0dc52dbc99b9d8f8"
@@ -199,11 +195,16 @@ jobs:
           cd ops-transformer
 
           case "${{ matrix.cann_version }}" in
+            "9.1.0")
+              OPS_TRANSFORMER_COMMIT="bcc6304656c9e712b50b1faa22872a158b1e34c5"
+              OPS_LIST="quant_lightning_indexer,quant_lightning_indexer_metadata,compressor,kv_quant_sparse_attn_sharedkv,kv_quant_sparse_attn_sharedkv_metadata,kv-compressor_epilog,hc_post,inplace_partial_rotary_mul,indexer_compress_epilog,moe_gating_top_k"
+              ;;
             "9.2.0")
               OPS_TRANSFORMER_COMMIT="33cc4ab2c7efe16d4f78b34a0dc52dbc99b9d8f8"
+              OPS_LIST="quant_lightning_indexer,quant_lightning_indexer_metadata,compressor,kv_quant_sparse_attn_sharedkv,kv_quant_sparse_attn_sharedkv_metadata,kv_compress_epilog,mhc_post,inplace_partial_rotary_mul,indexer_quant_cache,moe_gating_top_k"
               ;;
             *)
-              echo "Unsupported CANN version for 950: ${{ matrix.cann_version }}" >&2
+              echo "Unsupported CANN version: ${{ matrix.cann_version }}" >&2
               exit 1
               ;;
           esac
@@ -213,7 +214,7 @@ jobs:
 
           env -i PATH="${PATH}" bash --login -c "
             pip install packaging ninja
-            bash build.sh --pkg --experimental --soc=ascend950 --ops=\"quant_lightning_indexer,quant_lightning_indexer_metadata,compressor,kv_quant_sparse_attn_sharedkv,kv_quant_sparse_attn_sharedkv_metadata,kv_compress_epilog,mhc_post,inplace_partial_rotary_mul,indexer_quant_cache,moe_gating_top_k\"
+            bash build.sh --pkg --experimental --soc=ascend950 --ops=\"${OPS_LIST}\"
           "
 
       - name: Pack up packages
