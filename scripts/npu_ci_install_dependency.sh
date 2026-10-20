@@ -102,7 +102,8 @@ ${PIP_INSTALL} "${TORCH_NPU_URL}"
 
 ### Verify installed torch version
 ACTUAL_TORCH_VERSION="$(
-    python3 -c 'import torch; print(torch.__version__.split("+")[0])'
+    TORCH_DEVICE_BACKEND_AUTOLOAD=0 \
+        python3 -c 'import torch; print(torch.__version__.split("+")[0])'
 )"
 
 if [[ "${ACTUAL_TORCH_VERSION}" != "${TORCH_VERSION}" ]]; then
