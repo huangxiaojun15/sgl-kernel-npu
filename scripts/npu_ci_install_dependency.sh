@@ -8,10 +8,11 @@ export UV_PIP_INSTALL="uv pip install"
 
 
 ### Dependency Versions
-# Torch 和 torchvision 根据 CANN 版本自动选择
+# Torch、torchvision 和 torchaudio 根据 CANN 版本自动选择
 CANN_VERSION=""
 TORCH_VERSION=""
 TORCHVISION_VERSION=""
+TORCHAUDIO_VERSION=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -31,11 +32,13 @@ case "${CANN_VERSION}" in
     "9.2.0")
         TORCH_VERSION="2.13.0"
         TORCHVISION_VERSION="0.28.0"
+        TORCHAUDIO_VERSION="2.11.0"
         TORCH_NPU_URL="https://gitcode.com/Ascend/pytorch/releases/download/v26.2.0-pytorch2.13.0/torch_npu-2.13.0-cp312-cp312-manylinux_2_28_${ARCHITECT}.whl"
         ;;
     "9.1.0")
         TORCH_VERSION="2.10.0"
         TORCHVISION_VERSION="0.25.0"
+        TORCHAUDIO_VERSION="2.10.0"
         TORCH_NPU_URL="https://gitcode.com/Ascend/pytorch/releases/download/v26.1.0-pytorch2.10.0/torch_npu-2.10.0.post4-cp312-cp312-manylinux_2_28_${ARCHITECT}.whl"
         ;;
     *)
@@ -89,9 +92,9 @@ ${UV_PIP_INSTALL} \
 ### Install PyTorch
 ## torch
 ${UV_PIP_INSTALL} \
-    torch==${TORCH_VERSION} \
-    torchvision==${TORCHVISION_VERSION} \
-    torchaudio==${TORCH_VERSION} \
+    "torch==${TORCH_VERSION}" \
+    "torchvision==${TORCHVISION_VERSION}" \
+    "torchaudio==${TORCHAUDIO_VERSION}" \
     --index-url "${TORCH_CACHE_URL:-https://download.pytorch.org/whl/cpu}" \
     --extra-index-url "${PYPI_CACHE_URL:-https://pypi.org/simple/}"
 
