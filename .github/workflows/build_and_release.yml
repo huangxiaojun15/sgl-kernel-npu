@@ -13,86 +13,102 @@ on:
       - config.ini
       - build.sh
 jobs:
-  build-kernels:
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [x86_64, aarch64]
-        npu_hardware: [a3, "950"]
-        cann_version: ["9.1.0", "9.2.0"]
-    # checkout / install / build
-    steps:
-      - uses: actions/upload-artifact@v4
-        with:
-          name: kernel-${{ matrix.cann_version }}-${{ matrix.npu_hardware }}-${{ matrix.arch }}-${{ github.run_attempt }}
-          path: output/*.whl
-          if-no-files-found: error
-          compression-level: 0
-
-  build-deepep:
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [x86_64, aarch64]
-        npu_hardware: [a3, "950"]
-        cann_version: ["9.1.0", "9.2.0"]
-    steps:
-      - uses: actions/upload-artifact@v4
-        with:
-          name: deepep-${{ matrix.cann_version }}-${{ matrix.npu_hardware }}-${{ matrix.arch }}-${{ github.run_attempt }}
-          path: output/*.whl
-          if-no-files-found: error
-
-  build-attentions:
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [x86_64, aarch64]
-        cann_version: ["9.1.0", "9.2.0"]
-    steps:
-      - uses: actions/upload-artifact@v4
-        with:
-          name: attentions-${{ matrix.cann_version }}-${{ matrix.arch }}-${{ github.run_attempt }}
-          path: output/*.whl
-          if-no-files-found: error
-
-  build-memory-saver:
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [x86_64, aarch64]
-        cann_version: ["9.1.0", "9.2.0"]
-    steps:
-      - uses: actions/upload-artifact@v4
-        with:
-          name: memory-saver-${{ matrix.cann_version }}-${{ matrix.arch }}-${{ github.run_attempt }}
-          path: output/*.whl
-          if-no-files-found: error
-
-  publish:
-    if: github.event_name == 'release'
-    needs:
-      - build-kernels
-      - build-deepep
-      - build-attentions
-      - build-memory-saver
-    runs-on: ubuntu-24.04
+  build-and-release:
+    defaults:
+      run:
+        shell: bash
     permissions:
       contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+        npu_hardware: [a3, '950']
+        cann_version: ['9.1.0', '9.2.0']
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: quay.io/ascend/cann:${{ matrix.cann_version }}-${{ matrix.npu_hardware }}-ubuntu22.04-py3.12
+
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Checkout repository
+        uses: actions/checkout@v6
         with:
-          pattern: "*-${{ github.run_attempt }}"
-          path: release
-          merge-multiple: false
+          submodules: recursive
 
-      - name: Check wheel filename collisions
+      - name: Install dependency
         run: |
-          find release -type f -name '*.whl' -printf '%f\n' | sort | uniq -d | tee duplicates.txt
-          test ! -s duplicates.txt
+          bash scripts/npu_ci_install_dependency.sh \
+            --cann-version "${{ matrix.cann_version }}"
 
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: release/**/*.whl
+      - name: Build SGL-Kernel-NPU for a3
+        if: matrix.npu_hardware != '950'
+        run: |
+          env -i PATH="${PATH}" bash --login -c "
+            export LD_LIBRARY_PATH=${ASCEND_HOME_PATH}/runtime/lib64/stub:${LD_LIBRARY_PATH}:${ASCEND_HOME_PATH}/\$(arch)-linux/devlib &&
+            python3 setup.py --arch-version 2201 --ops all --artifact wheel -j 8
+          "
+
+      - name: Build SGL-Kernel-NPU for 950
+        if: matrix.npu_hardware == '950'
+        run: |
+          env -i PATH="${PATH}" bash --login -c "
+            export LD_LIBRARY_PATH=${ASCEND_HOME_PATH}/runtime/lib64/stub:${LD_LIBRARY_PATH}:${ASCEND_HOME_PATH}/\$(arch)-linux/devlib &&
+            python3 setup.py --arch-version 3510 --ops all --artifact wheel -j 2
+          "
+      - name: Build Attentions
+        run: |
+          env -i PATH="${PATH}" bash --login -c "
+            export LD_LIBRARY_PATH=${ASCEND_HOME_PATH}/runtime/lib64/stub:${LD_LIBRARY_PATH} &&
+            ./build.sh -a attentions
+          "
+
+      - name: Build Torch-Memory-Saver
+        run: |
+          env -i PATH="${PATH}" bash --login -c "
+            export LD_LIBRARY_PATH=${ASCEND_HOME_PATH}/runtime/lib64/stub:${LD_LIBRARY_PATH} &&
+            ./build.sh -a memory-saver
+          "
+
+      - name: Build DeepEP for a3
+        if: matrix.npu_hardware == 'a3'
+        run: |
+          env -i PATH="${PATH}" bash --login -c "
+            export LD_LIBRARY_PATH=${ASCEND_HOME_PATH}/runtime/lib64/stub:${LD_LIBRARY_PATH} &&
+            ./build.sh -a deepep
+          "
+
+      - name: Build DeepEP for 950
+        if: matrix.npu_hardware == '950'
+        run: |
+          env -i PATH="${PATH}" bash --login -c "
+            export LD_LIBRARY_PATH=${ASCEND_HOME_PATH}/runtime/lib64/stub:${LD_LIBRARY_PATH} &&
+            ./build.sh -a deepep Ascend950
+          "
+
+      - name: Pack up packages
+        run: |
+          export TORCH_DEVICE_BACKEND_AUTOLOAD=0
+          TORCH_VERSION="$(
+            python3 -c 'import torch; print(torch.__version__.split("+")[0])'
+          )"
+          PYTHON_VERSION="$(
+            python3 -c 'import platform; print(platform.python_version())' |
+              awk -F'.' '{print $1$2}'
+          )"
+          PACKAGE_NAME="sgl-kernel-npu-${{ github.event.release.tag_name }}-torch${TORCH_VERSION}-py${PYTHON_VERSION}-cann${{ matrix.cann_version }}-${{ matrix.npu_hardware }}-${{ matrix.arch }}.zip"
+          cd output/
+          zip -v "${PACKAGE_NAME}" ./*.whl
+          ls -al
+
+      - name: Upload Release Artifacts
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          files: ./output/*.zip
