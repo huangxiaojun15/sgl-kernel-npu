@@ -13,13 +13,6 @@ on:
       - config.ini
       - build.sh
 
-permissions:
-  contents: read
-
-defaults:
-  run:
-    shell: bash
-
 jobs:
   build-kernels:
     name: Kernels / ${{ matrix.arch }} / ${{ matrix.npu_hardware }} / CANN ${{ matrix.cann_version }}
